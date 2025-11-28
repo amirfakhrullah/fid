@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { api } from "./_generated/api";
 
 // Generate upload URL for video file
 export const generateUploadUrl = mutation({
@@ -9,11 +10,12 @@ export const generateUploadUrl = mutation({
   },
 });
 
-// Create video record after upload
+// Create video record after upload and schedule processing
 export const createVideo = mutation({
   args: {
     filename: v.string(),
     storageId: v.id("_storage"),
+    autoProcess: v.optional(v.boolean()), // Auto-start frame extraction
   },
   handler: async (ctx, args) => {
     const videoId = await ctx.db.insert("videos", {
@@ -27,6 +29,14 @@ export const createVideo = mutation({
         embedded: false,
       },
     });
+
+    // Schedule frame extraction if autoProcess is enabled (default: true)
+    if (args.autoProcess !== false) {
+      await ctx.scheduler.runAfter(0, api.processing.processVideo, {
+        videoId,
+      });
+    }
+
     return videoId;
   },
 });
@@ -102,6 +112,51 @@ export const storeSummary = mutation({
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.videoId, { summary: args.summary });
+  },
+});
+
+// Store Groq analysis (transcript-based)
+export const storeGroqAnalysis = mutation({
+  args: {
+    videoId: v.id("videos"),
+    summary: v.string(),
+    keywords: v.array(v.string()),
+    categories: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      summary: args.summary,
+      groqAnalysis: {
+        keywords: args.keywords,
+        categories: args.categories,
+      },
+    });
+  },
+});
+
+// Store comprehensive video analysis from Claude Vision (optional)
+export const storeVideoAnalysis = mutation({
+  args: {
+    videoId: v.id("videos"),
+    summary: v.string(),
+    keyMoments: v.array(
+      v.object({
+        timestamp: v.union(v.number(), v.string()),
+        description: v.string(),
+      })
+    ),
+    keywords: v.array(v.string()),
+    categories: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.videoId, {
+      summary: args.summary,
+      claudeAnalysis: {
+        keyMoments: args.keyMoments,
+        keywords: args.keywords,
+        categories: args.categories,
+      },
+    });
   },
 });
 

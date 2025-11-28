@@ -27,6 +27,26 @@ export default defineSchema({
     transcriptEmbedding: v.optional(v.array(v.float64())),
     summary: v.optional(v.string()),
     summaryEmbedding: v.optional(v.array(v.float64())),
+    // Groq analysis (transcript-based)
+    groqAnalysis: v.optional(
+      v.object({
+        keywords: v.array(v.string()),
+        categories: v.array(v.string()),
+      })
+    ),
+    // Claude Vision analysis (optional, sampled frames approach)
+    claudeAnalysis: v.optional(
+      v.object({
+        keyMoments: v.array(
+          v.object({
+            timestamp: v.union(v.number(), v.string()),
+            description: v.string(),
+          })
+        ),
+        keywords: v.array(v.string()),
+        categories: v.array(v.string()),
+      })
+    ),
   })
     .index("by_status", ["status"])
     .vectorIndex("by_transcript_embedding", {

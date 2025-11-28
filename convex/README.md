@@ -7,13 +7,15 @@ convex/
 ├── schema.ts              # Database schema with vector indexes
 ├── videos.ts              # Video CRUD operations
 ├── frames.ts              # Frame CRUD operations
+├── processing.ts          # Auto-processing pipeline
 ├── search.ts              # Simple text search (query)
 └── actions/
     ├── videoUpload.ts     # Upload videos from URL
-    ├── frameExtraction.ts # Extract frames from video
-    ├── claudeVision.ts    # Analyze frames with Claude
+    ├── frameExtraction.ts # Extract frames with FFmpeg
+    ├── groqAnalysis.ts    # Analyze transcript with Groq Llama (PRIMARY)
     ├── transcription.ts   # Transcribe with Groq Whisper
-    ├── embeddings.ts      # Generate embeddings (OpenAI, CLIP)
+    ├── embeddings.ts      # Generate embeddings (OpenAI)
+    ├── claudeVision.ts    # Optional: Analyze frames with Claude Vision
     └── search.ts          # Hybrid vector search (action)
 ```
 
@@ -22,11 +24,30 @@ convex/
 Add these to your Convex dashboard (Settings > Environment Variables):
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...     # For Claude Vision
-GROQ_API_KEY=gsk_...             # For Whisper transcription
-OPENAI_API_KEY=sk-...            # For text embeddings
-REPLICATE_API_TOKEN=r8_...       # For CLIP image embeddings
+GROQ_API_KEY=gsk_...             # Required: Whisper + Llama analysis
+OPENAI_API_KEY=sk-...            # Required: Text embeddings
+REPLICATE_API_TOKEN=r8_...       # Required: CLIP image embeddings
+ANTHROPIC_API_KEY=sk-ant-...     # Optional: Claude Vision for deeper visual analysis
 ```
+
+## Pipeline Architecture
+
+**Primary (Multi-modal search with Groq + CLIP):**
+1. **Upload** → Video file to Convex storage
+2. **Extract Frames** → FFmpeg extracts frames every 2s
+3. **Transcribe** → Groq Whisper transcribes audio
+4. **Analyze** → Groq Llama generates summary/keywords from transcript
+5. **Embed Frames** → CLIP generates visual embeddings (512-dim vectors)
+6. **Embed Text** → OpenAI embeds transcript + summary (1536-dim vectors)
+7. **Search** → Hybrid vector search across visual + text embeddings
+
+**Cost per video:** ~$0.015 (Groq: $0.01 + OpenAI: $0.002 + CLIP: $0.003)
+
+**Optional (Claude Vision for enhanced visual understanding):**
+- Samples 1 frame every 10 seconds (e.g., 6 frames for 1-min video, 30 frames for 5-min video)
+- Analyzes each frame with Claude Vision to generate descriptions
+- Cost scales with video length: ~$0.02 per minute
+- Use when you need human-readable frame descriptions or videos with no audio
 
 ## Quick Start: Testing in Convex Dashboard
 
