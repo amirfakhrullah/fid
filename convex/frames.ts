@@ -140,7 +140,8 @@ export const getFramesWithoutEmbeddings = query({
       .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
       .collect();
 
-    const unembedded = frames.filter((f) => !f.imageEmbedding);
+    const unembedded = frames
+    .filter((f) => !f.imageEmbedding);
     const limited = args.limit ? unembedded.slice(0, args.limit) : unembedded;
 
     return Promise.all(

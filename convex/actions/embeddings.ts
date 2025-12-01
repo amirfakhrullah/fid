@@ -103,7 +103,7 @@ export const embedImage = action({
         body: JSON.stringify({
           version: REPLICATE_CLIP_MODEL.split(":")[1],
           input: {
-            image: args.imageUrl,
+            inputs: args.imageUrl,
           },
         }),
       });
@@ -210,7 +210,7 @@ export const embedTextWithCLIP = action({
         body: JSON.stringify({
           version: REPLICATE_CLIP_MODEL.split(":")[1],
           input: {
-            text: args.text,
+            inputs: args.text,
           },
         }),
       });

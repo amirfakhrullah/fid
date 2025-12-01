@@ -400,6 +400,7 @@ export const searchImages = action({
       });
 
     console.log(`[ImageSearch] CLIP embedding dimensions: ${clipResult.dimensions}`);
+    console.log(`[ImageSearch] First 5 embedding values: ${clipResult.embedding.slice(0, 5)}`);
 
     // Search image embeddings
     const results = await ctx.vectorSearch("frames", "by_image_embedding", {
