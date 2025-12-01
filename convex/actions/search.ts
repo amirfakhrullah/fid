@@ -95,10 +95,10 @@ export const hybridSearch = action({
     // CLIP embedding for image search (only if image weight > 0)
     let clipEmbedding: number[] | null = null;
     if (weights.image > 0) {
-      const clipEmbeddingResult = await ctx.runAction(
-        api.actions.embeddings.embedTextWithCLIP,
-        { text: args.query }
-      );
+      const clipEmbeddingResult: { embedding: number[]; dimensions: number } =
+        await ctx.runAction(api.actions.embeddings.embedTextWithCLIP, {
+          text: args.query,
+        });
       clipEmbedding = clipEmbeddingResult.embedding;
       console.log(`[Search] CLIP embedding dimensions: ${clipEmbeddingResult.dimensions}`);
     }
@@ -379,3 +379,66 @@ function clusterTimestamps(
 
   return clusters;
 }
+
+/**
+ * Simple image search - for testing CLIP embeddings
+ */
+export const searchImages = action({
+  args: {
+    query: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 10;
+
+    console.log(`[ImageSearch] Query: "${args.query}"`);
+
+    // Get CLIP embedding for query
+    const clipResult: { embedding: number[]; dimensions: number } =
+      await ctx.runAction(api.actions.embeddings.embedTextWithCLIP, {
+        text: args.query,
+      });
+
+    console.log(`[ImageSearch] CLIP embedding dimensions: ${clipResult.dimensions}`);
+
+    // Search image embeddings
+    const results = await ctx.vectorSearch("frames", "by_image_embedding", {
+      vector: clipResult.embedding,
+      limit,
+    });
+
+    // Frame type from getFrame query
+    type FrameResult = {
+      _id: Id<"frames">;
+      videoId: Id<"videos">;
+      timestamp: number;
+      storageId: Id<"_storage">;
+      description?: string;
+      keywords?: string[];
+      url: string | null;
+    } | null;
+
+    // Get frame details
+    const frames = await Promise.all(
+      results.map(async (result) => {
+        const frame = (await ctx.runQuery(api.frames.getFrame, {
+          frameId: result._id as Id<"frames">,
+        })) as FrameResult;
+        return {
+          frameId: result._id as string,
+          score: result._score,
+          timestamp: frame?.timestamp,
+          url: frame?.url,
+          description: frame?.description,
+          keywords: frame?.keywords,
+        };
+      })
+    );
+
+    return {
+      query: args.query,
+      dimensions: clipResult.dimensions,
+      results: frames,
+    };
+  },
+});
