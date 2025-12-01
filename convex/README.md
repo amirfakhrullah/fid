@@ -25,23 +25,28 @@ Add these to your Convex dashboard (Settings > Environment Variables):
 
 ```
 GROQ_API_KEY=gsk_...             # Required: Whisper + Llama analysis
-OPENAI_API_KEY=sk-...            # Required: Text embeddings
-REPLICATE_API_TOKEN=r8_...       # Required: CLIP image embeddings
+OPENAI_API_KEY=sk-...            # Required: Text embeddings + Vision (for frame descriptions)
+REPLICATE_API_TOKEN=r8_...       # Optional: CLIP image embeddings (alternative to OpenAI Vision)
 ANTHROPIC_API_KEY=sk-ant-...     # Optional: Claude Vision for deeper visual analysis
 ```
 
 ## Pipeline Architecture
 
-**Primary (Multi-modal search with Groq + CLIP):**
+**Primary (Multi-modal search with Groq + OpenAI):**
 1. **Upload** → Video file to Convex storage
-2. **Extract Frames** → FFmpeg extracts frames every 2s
+2. **Extract Frames** → FFmpeg extracts frames every 10s
 3. **Transcribe** → Groq Whisper transcribes audio
 4. **Analyze** → Groq Llama generates summary/keywords from transcript
-5. **Embed Frames** → CLIP generates visual embeddings (512-dim vectors)
+5. **Embed Frames** → OpenAI Vision (GPT-4o-mini) describes frames, then embeds descriptions (1536-dim vectors)
 6. **Embed Text** → OpenAI embeds transcript + summary (1536-dim vectors)
 7. **Search** → Hybrid vector search across visual + text embeddings
 
-**Cost per video:** ~$0.015 (Groq: $0.01 + OpenAI: $0.002 + CLIP: $0.003)
+**Cost per video (2 min):** ~$0.02-0.03 (Groq: $0.01 + OpenAI Vision: 12 frames × ~$0.001 = $0.012 + OpenAI embeddings: $0.002)
+
+**Alternative: CLIP via Replicate (cheaper but with rate limits):**
+- Uses CLIP for visual embeddings (512-dim vectors)
+- Cost: ~$0.015 per video
+- Requires payment method or patience (6 requests/min free tier)
 
 **Optional (Claude Vision for enhanced visual understanding):**
 - Samples 1 frame every 10 seconds (e.g., 6 frames for 1-min video, 30 frames for 5-min video)

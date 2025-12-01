@@ -76,7 +76,7 @@ export default defineSchema({
     .index("by_video_timestamp", ["videoId", "timestamp"])
     .vectorIndex("by_image_embedding", {
       vectorField: "imageEmbedding",
-      dimensions: 512, // CLIP ViT-B/32 dimensions
+      dimensions: 768, // CLIP ViT-Large-patch14 dimensions
       filterFields: ["videoId"],
     })
     .vectorIndex("by_keywords_embedding", {

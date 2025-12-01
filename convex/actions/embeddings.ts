@@ -87,27 +87,55 @@ export const embedImage = action({
       throw new Error("REPLICATE_API_TOKEN environment variable is required");
     }
 
-    // Start prediction
-    const response = await fetch("https://api.replicate.com/v1/predictions", {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        version: REPLICATE_CLIP_MODEL.split(":")[1],
-        input: {
-          image: args.imageUrl,
-        },
-      }),
-    });
+    // Retry logic for rate limiting
+    let retries = 0;
+    const maxRetries = 5;
+    let prediction;
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Replicate API error: ${response.status} - ${error}`);
+    while (retries < maxRetries) {
+      // Start prediction
+      const response = await fetch("https://api.replicate.com/v1/predictions", {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          version: REPLICATE_CLIP_MODEL.split(":")[1],
+          input: {
+            image: args.imageUrl,
+          },
+        }),
+      });
+
+      if (response.status === 429) {
+        // Rate limited - parse retry_after and wait
+        const errorData = await response.json();
+        const retryAfter = errorData.retry_after || 10; // Default 10s if not specified
+        console.log(
+          `[Embeddings] Rate limited. Waiting ${retryAfter}s before retry ${retries + 1}/${maxRetries}...`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, (retryAfter + 1) * 1000)
+        ); // +1s buffer
+        retries++;
+        continue;
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Replicate API error: ${response.status} - ${error}`);
+      }
+
+      prediction = await response.json();
+      break; // Success - exit retry loop
     }
 
-    const prediction = await response.json();
+    if (!prediction) {
+      throw new Error(
+        `Failed to create prediction after ${maxRetries} retries due to rate limiting`
+      );
+    }
 
     // Poll for completion
     let result = prediction;
@@ -128,9 +156,131 @@ export const embedImage = action({
       throw new Error(`CLIP embedding failed: ${result.error}`);
     }
 
+    // Handle different output formats from Replicate CLIP models
+    let embedding: number[];
+
+    if (Array.isArray(result.output)) {
+      // Check if it's an array of objects [{embedding: [...]}] or direct numbers
+      if (result.output.length > 0 && typeof result.output[0] === "object" && result.output[0]?.embedding) {
+        embedding = result.output[0].embedding;
+      } else {
+        embedding = result.output;
+      }
+    } else if (result.output?.embedding) {
+      // Object with embedding property
+      embedding = result.output.embedding;
+    } else {
+      console.error("[Embeddings] Unexpected output format:", JSON.stringify(result.output).slice(0, 500));
+      throw new Error(`Unexpected CLIP output format: ${typeof result.output}`);
+    }
+
     return {
-      embedding: result.output as number[],
-      dimensions: 512, // CLIP ViT-B/32
+      embedding,
+      dimensions: embedding.length,
+    };
+  },
+});
+
+/**
+ * Generate text embedding using CLIP via Replicate
+ * Use this for searching against CLIP image embeddings
+ */
+export const embedTextWithCLIP = action({
+  args: {
+    text: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const apiToken = process.env.REPLICATE_API_TOKEN;
+    if (!apiToken) {
+      throw new Error("REPLICATE_API_TOKEN environment variable is required");
+    }
+
+    // Retry logic for rate limiting
+    let retries = 0;
+    const maxRetries = 5;
+    let prediction;
+
+    while (retries < maxRetries) {
+      const response = await fetch("https://api.replicate.com/v1/predictions", {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          version: REPLICATE_CLIP_MODEL.split(":")[1],
+          input: {
+            text: args.text,
+          },
+        }),
+      });
+
+      if (response.status === 429) {
+        const errorData = await response.json();
+        const retryAfter = errorData.retry_after || 10;
+        console.log(
+          `[Embeddings] Rate limited. Waiting ${retryAfter}s before retry ${retries + 1}/${maxRetries}...`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, (retryAfter + 1) * 1000)
+        );
+        retries++;
+        continue;
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Replicate API error: ${response.status} - ${error}`);
+      }
+
+      prediction = await response.json();
+      break;
+    }
+
+    if (!prediction) {
+      throw new Error(
+        `Failed to create prediction after ${maxRetries} retries due to rate limiting`
+      );
+    }
+
+    // Poll for completion
+    let result = prediction;
+    while (result.status !== "succeeded" && result.status !== "failed") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const pollResponse = await fetch(
+        `https://api.replicate.com/v1/predictions/${prediction.id}`,
+        {
+          headers: {
+            Authorization: `Token ${apiToken}`,
+          },
+        }
+      );
+      result = await pollResponse.json();
+    }
+
+    if (result.status === "failed") {
+      throw new Error(`CLIP text embedding failed: ${result.error}`);
+    }
+
+    // Handle different output formats from Replicate CLIP models
+    let embedding: number[];
+
+    if (Array.isArray(result.output)) {
+      if (result.output.length > 0 && typeof result.output[0] === "object" && result.output[0]?.embedding) {
+        embedding = result.output[0].embedding;
+      } else {
+        embedding = result.output;
+      }
+    } else if (result.output?.embedding) {
+      embedding = result.output.embedding;
+    } else {
+      console.error("[Embeddings] Unexpected output format:", JSON.stringify(result.output).slice(0, 500));
+      throw new Error(`Unexpected CLIP output format: ${typeof result.output}`);
+    }
+
+    return {
+      embedding,
+      dimensions: embedding.length,
     };
   },
 });
@@ -221,12 +371,101 @@ export const embedFrameImage = action({
 });
 
 /**
+ * Embed frame image using OpenAI Vision (alternative to CLIP)
+ * Uses GPT-4o-mini to describe the frame, then embeds the description
+ * More cost-effective and uses OpenAI credits
+ */
+export const embedFrameImageWithOpenAI = action({
+  args: {
+    frameId: v.id("frames"),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{ success: true; frameId: string; dimensions: number; description: string }> => {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY environment variable is required");
+    }
+
+    const frame = await ctx.runQuery(api.frames.getFrame, {
+      frameId: args.frameId,
+    });
+
+    if (!frame || !frame.url) {
+      throw new Error(`Frame ${args.frameId} not found or has no URL`);
+    }
+
+    // Use GPT-4o-mini vision to describe the frame
+    const visionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: frame.url,
+                  detail: "low", // Low detail for cost efficiency
+                },
+              },
+              {
+                type: "text",
+                text: "Describe this video frame in 1-2 sentences. Focus on key visual elements, objects, people, colors, actions, and setting.",
+              },
+            ],
+          },
+        ],
+        max_tokens: 150,
+      }),
+    });
+
+    if (!visionResponse.ok) {
+      const error = await visionResponse.text();
+      throw new Error(`OpenAI Vision API error: ${visionResponse.status} - ${error}`);
+    }
+
+    const visionResult = await visionResponse.json();
+    const description = visionResult.choices[0].message.content.trim();
+
+    console.log(`[Embeddings] Frame description: ${description}`);
+
+    // Embed the description
+    const embeddingResult: { embedding: number[]; dimensions: number; tokens: number } =
+      await ctx.runAction(api.actions.embeddings.embedText, {
+        text: description,
+      });
+
+    // Store embedding (using same field as CLIP for compatibility)
+    await ctx.runMutation(api.frames.updateFrameEmbeddings, {
+      frameId: args.frameId,
+      imageEmbedding: embeddingResult.embedding,
+    });
+
+    return {
+      success: true,
+      frameId: args.frameId as string,
+      dimensions: embeddingResult.dimensions,
+      description,
+    };
+  },
+});
+
+/**
  * Embed all frames for a video
  */
 export const embedVideoFrames = action({
   args: {
     videoId: v.id("videos"),
     embedImages: v.optional(v.boolean()), // Whether to embed images (slower, costs more)
+    useOpenAIVision: v.optional(v.boolean()), // Use OpenAI Vision instead of CLIP (default: false)
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -251,7 +490,8 @@ export const embedVideoFrames = action({
       error?: string;
     }> = [];
 
-    for (const frame of frames) {
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
       try {
         // Always embed keywords if available
         if (frame.keywords && frame.keywords.length > 0) {
@@ -260,11 +500,27 @@ export const embedVideoFrames = action({
           });
         }
 
-        // Optionally embed images with CLIP
+        // Optionally embed images
         if (args.embedImages) {
-          await ctx.runAction(api.actions.embeddings.embedFrameImage, {
-            frameId: frame._id,
-          });
+          if (args.useOpenAIVision) {
+            // Use OpenAI Vision (no rate limiting needed, uses your credits)
+            await ctx.runAction(api.actions.embeddings.embedFrameImageWithOpenAI, {
+              frameId: frame._id,
+            });
+          } else {
+            // Use CLIP via Replicate (with rate limiting)
+            await ctx.runAction(api.actions.embeddings.embedFrameImage, {
+              frameId: frame._id,
+            });
+
+            // Add delay except for the last frame
+            if (i < frames.length - 1) {
+              console.log(
+                `[Embeddings] Waiting 200ms for rate limit (${i + 1}/${frames.length})...`
+              );
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+          }
         }
 
         results.push({ frameId: frame._id, success: true });

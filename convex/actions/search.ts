@@ -84,16 +84,54 @@ export const hybridSearch = action({
     console.log(`[Search] Query: "${args.query}"`);
     console.log(`[Search] Weights:`, weights);
 
-    // Generate query embedding (text)
+    // Generate query embeddings
+    // OpenAI embedding for text-based search (keywords, transcript, summary)
     const textEmbeddingResult = await ctx.runAction(
       api.actions.embeddings.embedText,
       { text: args.query }
     );
     const textEmbedding = textEmbeddingResult.embedding;
 
+    // CLIP embedding for image search (only if image weight > 0)
+    let clipEmbedding: number[] | null = null;
+    if (weights.image > 0) {
+      const clipEmbeddingResult = await ctx.runAction(
+        api.actions.embeddings.embedTextWithCLIP,
+        { text: args.query }
+      );
+      clipEmbedding = clipEmbeddingResult.embedding;
+      console.log(`[Search] CLIP embedding dimensions: ${clipEmbeddingResult.dimensions}`);
+    }
+
     // Collect all matches
     const frameMatches: FrameMatch[] = [];
     const videoMatches: VideoMatch[] = [];
+
+    // Search image embeddings with CLIP
+    if (weights.image > 0 && clipEmbedding) {
+      const imageResults = await ctx.vectorSearch("frames", "by_image_embedding", {
+        vector: clipEmbedding,
+        limit: limit * 2,
+      });
+
+      for (const result of imageResults) {
+        const frame = await ctx.runQuery(api.frames.getFrame, {
+          frameId: result._id,
+        });
+        if (frame) {
+          frameMatches.push({
+            frameId: result._id as string,
+            videoId: frame.videoId as string,
+            timestamp: frame.timestamp,
+            score: result._score * weights.image,
+            source: "image",
+            description: frame.description ?? undefined,
+            keywords: frame.keywords ?? undefined,
+            thumbnailUrl: frame.url ?? undefined,
+          });
+        }
+      }
+    }
 
     // Search keywords embeddings
     if (weights.keywords > 0) {

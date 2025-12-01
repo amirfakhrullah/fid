@@ -33,7 +33,7 @@ export const processVideo = action({
         api.actions.frameExtraction.extractFrames,
         {
           videoId: args.videoId,
-          intervalSeconds: 2,
+          intervalSeconds: 10, // 1 frame every 10 seconds
         }
       );
 
@@ -88,7 +88,7 @@ export const processVideoFull = action({
         api.actions.frameExtraction.extractFrames,
         {
           videoId: args.videoId,
-          intervalSeconds: 2,
+          intervalSeconds: 10, // 1 frame every 10 seconds
         }
       );
 
@@ -116,11 +116,12 @@ export const processVideoFull = action({
         `[Processing] Analysis complete: ${analyzeResult.keywords.length} keywords, ${analyzeResult.categories.length} categories`
       );
 
-      // Step 4: Generate embeddings (CLIP for frames, OpenAI for text)
-      console.log(`[Processing] Step 4: Generating frame embeddings with CLIP...`);
+      // Step 4: Generate embeddings (OpenAI Vision for frames, OpenAI for text)
+      console.log(`[Processing] Step 4: Generating frame embeddings with OpenAI Vision...`);
       await ctx.runAction(api.actions.embeddings.embedVideoFrames, {
         videoId: args.videoId,
-        embedImages: true, // Enable CLIP for visual search
+        embedImages: true,
+        useOpenAIVision: true, // Use OpenAI Vision instead of CLIP (uses your credits, no rate limits)
       });
 
       console.log(`[Processing] Step 5: Generating text embeddings with OpenAI...`);
